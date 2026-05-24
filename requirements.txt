@@ -1,7 +1,7 @@
 analytics-python==1.2.9
 bamboolib==1.26.0
 certifi==2021.5.30
-cryptography==2.9.2
+cryptography==46.0.7
 cycler==0.10.0
 ipyslickgrid==0.0.3
 joblib==1.0.1
