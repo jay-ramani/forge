@@ -1,397 +1,469 @@
-# Scikit-learn-project-template
+# Fused Observation & Remote-Sensing Ground Enhancement (FORGE) 🛰️🌦️
 
+> **Satellite data based weather prediction augmented with terrestrial sensor data**
 
-## About the project
-* Folder structure suitable for many machine learning projects. Especially for those with small amount of available training data.
-* `.json` config file support for convenient parameter tuning.
-* Customizable command line options for more convenient parameter tuning. It supports grid search, random search and bayesian search.
-* Abstract base classes for faster development:
-  * `BaseOptimizer` handles execution of grid search, saving and loading of models and formation of test and train reports.
-  * `BaseDataLoader` handles splitting of training and testing data. Spilt is performed depending on settings provided in config file.
-  * `BaseModel` handles construction of consecutive steps defined in config file.
-* Suitable for tunining of machine learning models which follow `scikit-learn` nomenclature.
-    For the time being tested open libraries:
-  * scikit-learn
-  * sktime
-  * tsfresh
+FORGE is a Python machine learning framework for weather forecasting that fuses multi-source observational data — primarily satellite-derived imagery and measurements — with ground-level terrestrial sensor readings. By combining the macro-scale spatial coverage of orbital platforms with the high-frequency, point-accurate readings of surface sensors, Forge produces more accurate and localised weather predictions than either source alone could achieve.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Folder Structure](#folder-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+- [Configuration](#configuration)
+  - [Config File Format](#config-file-format)
+  - [Pipeline](#pipeline)
+  - [Unions (Feature Fusion)](#unions-feature-fusion)
+  - [Hyperparameter Search](#hyperparameter-search)
+- [Usage](#usage)
+  - [Training a Model](#training-a-model)
+  - [Testing a Model](#testing-a-model)
+  - [CLI Overrides](#cli-overrides)
+- [Customisation](#customisation)
+  - [Custom Data Loader](#custom-data-loader)
+  - [Custom Model](#custom-model)
+  - [Custom Optimizer](#custom-optimizer)
+- [Data Sources](#data-sources)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Overview
+
+Weather prediction at a fine spatial and temporal resolution is a hard problem. Satellite platforms provide excellent broad-area coverage but are limited in temporal cadence and struggle with near-surface boundary-layer phenomena. Terrestrial sensors — weather stations, IoT motes, MEMS pressure/humidity/temperature arrays — offer dense temporal sampling but sparse geographic coverage.
+
+Forge addresses this complementarity through a **sensor-fusion** approach: satellite data (e.g. GOES, MSG, Sentinel, or custom raster extracts) and terrestrial sensor time-series are ingested via pluggable data loaders, transformed through a configurable scikit-learn–compatible pipeline, and optimised with automated hyperparameter search (grid, random, or Bayesian). The result is a trained predictive model that leverages the best of both worlds.
+
+---
+
+## Key Features
+
+- **Dual-source data ingestion** — dedicated loaders for satellite raster/spectral data and terrestrial sensor tabular time-series.
+- **Sensor fusion pipelines** — `FeatureUnion`-style merging of heterogeneous feature streams within a single, declarative pipeline.
+- **JSON-driven configuration** — all data paths, pipeline steps, hyperparameter grids, cross-validation strategies, and scoring metrics are expressed in a single `.json` file with no code changes required.
+- **Automated hyperparameter optimisation** — out-of-the-box support for `GridSearchCV`, `RandomizedSearchCV`, and Bayesian search via `scikit-optimize`.
+- **Extensible abstract base classes** — `BaseDataLoader`, `BaseModel`, and `BaseOptimizer` make it straightforward to plug in new data sources, algorithms, or evaluation logic.
+- **Reproducible experiments** — random seeds, train/test splits, and full config snapshots are saved alongside model artefacts.
+- **Debug mode** — step-by-step pipeline introspection with intermediate output shapes at every stage.
+- **Compatible with the scikit-learn ecosystem** — works with scikit-learn, sktime, and tsfresh out of the box.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────┐    ┌─────────────────────────────────────┐
+│      Satellite Data Source   │    │    Terrestrial Sensor Network    │
+│  (raster imagery, spectral   │    │  (weather stations, IoT nodes,   │
+│   bands, retrieval products) │    │   MEMS arrays, reanalysis grids) │
+└──────────────────┬──────────────┘    └──────────────────┬──────────────────┘
+                 │                                    │
+                 ▼                                    ▼
+        ┌───────────────────────────────────────────────────┐
+        │               BaseDataLoader                  │
+        │   • Train / test split        • Shuffling     │
+        │   • Stratification            • Normalisation │
+        └─────────────────────────┬─────────────────────────┘
+                                │
+                                ▼
+        ┌──────────────────────────────────────────────────┐
+        │                  BaseModel                   │
+        │   Pipeline of scikit-learn–compatible steps: │
+        │     Scaler → Feature Engineering → Regressor │
+        │   Unions for parallel feature stream fusion  │
+        └───────────────────────┬──────────────────────────┘
+                              │
+                              ▼
+        ┌────────────────────────────────────────────────┐
+        │               BaseOptimizer                │
+        │   • GridSearchCV / RandomizedSearchCV /    │
+        │     BayesSearchCV hyperparameter tuning    │
+        │   • Cross-validation                       │
+        │   • Model + report persistence             │
+        └───────────────────────┬────────────────────────┘
+                              │
+                              ▼
+                   ┌──────────────────────┐
+                   │   Saved Artefacts  │
+                   │  model · config ·  │
+                   │  train report ·    │
+                   │  test report       │
+                   └──────────────────────┘
+```
+
+---
+
+## Folder Structure
+
+```
+forge/
+│
+├── main.py                        # Entry point — training and optional testing
+│
+├── requirements.txt               # Python dependencies
+│
+├── base/                          # Abstract base classes
+│   ├── base_data_loader.py        #   Train/test split, shuffling
+│   ├── base_model.py              #   Pipeline construction and step management
+│   └── base_optimizer.py         #   Optimisation, model save/load, report export
+│
+├── configs/                       # JSON experiment configurations
+│   ├── config_classification.json #   Example: cloud-type classification
+│   └── config_regression.json    #   Example: temperature / precipitation regression
+│
+├── data/                          # Default location for input data files
+│   ├── satellite/                 #   Satellite-derived features (raster extracts, etc.)
+│   └── sensors/                  #   Terrestrial sensor time-series (CSV, HDF5, etc.)
+│
+├── data_loaders/
+│   └── data_loaders.py           # Concrete data loaders for satellite + sensor data
+│
+├── models/
+│   ├── __init__.py               # Registry: maps pipeline step names to classes
+│   └── models.py                 # Concrete model definitions
+│
+├── optimizers/
+│   └── optimizers.py             # Concrete optimizers (regression, classification)
+│
+├── saved/                         # Output artefacts (auto-created at runtime)
+│   ├── <ExperimentName>/
+│   │   ├── model.pkl
+│   │   ├── config.json
+│   │   ├── report_train.txt
+│   │   └── report_test.txt
+│
+├── utils/
+│   ├── parse_config.py           # ConfigParser: merges JSON config with CLI args
+│   ├── parse_params.py           # Hyperparameter grid helpers
+│   └── utils.py                  # General utilities
+│
+└── wrappers/
+    ├── wrappers.py               # Modified sklearn estimators (e.g. PLS wrapper)
+    └── data_transformations.py   # Custom transforms (e.g. Savitzky-Golay filter)
+```
+
+---
 
 ## Getting Started
 
-To get a local copy up and running follow steps below.
-### Requirements
-* Python >= `3.7`
-* Packages included in `requirements.txt` file
-* (Anaconda for easy installation)
+### Prerequisites
 
-### Install dependencies
+- Python ≥ 3.7
+- [Anaconda](https://www.anaconda.com/) (recommended for environment management)
 
-Create and activate virtual environment:
-```sh
-conda create -n yourenvname python=3.7
-conda activate yourenvname
+### Installation
+
+**1. Clone the repository**
+
+```bash
+git clone https://github.com/jay-ramani/forge.git
+cd forge
 ```
 
-Install packages:
-```sh
+**2. Create and activate a virtual environment**
+
+```bash
+conda create -n forge-env python=3.9
+conda activate forge-env
+```
+
+**3. Install dependencies**
+
+```bash
 python -m pip install -r requirements.txt
 ```
 
-## Folder Structure
-  ```
-  sklearn-project-template/
-  │
-  ├── main.py - main script to start training and (optionally) testing
-  │
-  ├── base/ - abstract base classes
-  │   ├── base_data_loader.py
-  │   ├── base_model.py
-  │   └── base_optimizer.py
-  │
-  ├── configs/ - holds configuration for training and testing
-  │   ├── config_classification.json
-  │   └── config_regression.json
-  │
-  ├── data/ - default directory for storing input data
-  │
-  ├── data_loaders/ - anything about data loading goes here
-  │   └── data_loaders.py
-  │
-  ├── models/ - models
-  │   ├── __init__.py - defined models by name
-  │   └── models.py
-  │
-  ├── optimizers/ - optimizers
-  │   └── optimizers.py
-  │
-  ├── saved/ - config, model and reports are saved here
-  │   ├── Classification
-  │   └── Regression
-  │
-  ├── utils/ - utility functions
-  │   ├── parse_config.py - class to handle config file and cli options
-  │   ├── parse_params.py
-  │   └── utils.py
-  │
-  ├── wrappers/ - wrappers of modified sklearn models or self defined transforms
-  │   ├── data_transformations.py
-  │   └── wrappers.py
-  ```
+---
 
-## Usage
-Models in this repo are trained on two well-known datasets: iris and boston. First is used for classification and second for regression problem.
+## Configuration
 
-Run classification:
-   ```sh
-python main.py -c configs/config_classification.json
-   ```
-Run regression:
-   ```sh
-python main.py -c configs/config_regression.json
-   ```
+All experiment parameters live in a single JSON config file. No source changes are needed to switch datasets, algorithms, or search strategies.
 
-### Config file format
-Config files are in `.json` format. Example of such config is shown below:
-```javascript
+### Config File Format
+
+```json
 {
-    "name": "Classification",   // session name
+    "name": "WeatherRegression",
 
     "model": {
-        "type": "Model",    // model name
+        "type": "Model",
         "args": {
-            "pipeline": ["scaler", "PLS", "pf", "SVC"],     // pipeline of methods
-            "unions": {     // unions of methods included in pipeline
+            "pipeline": ["scaler", "feature_union", "GBR"],
+            "unions": {
+                "feature_union": ["satellite_features", "sensor_features"]
             }
         }
     },
 
-    "tuned_parameters":[{   // hyperparameters to be tuned with search method
-                        "SVC__kernel": ["rbf"],
-                        "SVC__gamma": [1e-5, 1e-6, 1],
-                        "SVC__C": [1, 100, 1000],
-                        "PLS__n_components": [1,2,3]
-                    }],
+    "tuned_parameters": [{
+        "GBR__n_estimators":  [100, 300, 500],
+        "GBR__max_depth":     [3, 5, 7],
+        "GBR__learning_rate": [0.01, 0.05, 0.1]
+    }],
 
-    "optimizer": "OptimizerClassification",    // name of optimizer
+    "optimizer": "OptimizerRegression",
 
-    "search_method":{
-        "type": "GridSearchCV",    // method used to search through parameters
+    "search_method": {
+        "type": "BayesSearchCV",
         "args": {
-            "refit": false,
-            "n_jobs": -1,
-            "verbose": 2,
-            "error_score": 0
+            "n_iter":   50,
+            "n_jobs":   -1,
+            "verbose":  1,
+            "refit":    true
         }
     },
 
     "cross_validation": {
-        "type": "RepeatedStratifiedKFold",     // type of cross-validation used
+        "type": "RepeatedKFold",
         "args": {
-            "n_splits": 5,
-            "n_repeats": 10,
-            "random_state": 1
+            "n_splits":    5,
+            "n_repeats":   5,
+            "random_state": 42
         }
     },
 
     "data_loader": {
-        "type": "Classification",      // name of dataloader class
-        "args":{
-            "data_path": "data/path-to-file",    // path to data
-            "shuffle": true,    // if data shuffled before optimization
-            "test_split": 0.2,  // use split method for model testing
-            "stratify": true,   // if data stratified before optimization
-            "random_state":1    // random state for repeaded output
+        "type": "WeatherDataLoader",
+        "args": {
+            "data_path":     "data/",
+            "shuffle":       true,
+            "test_split":    0.2,
+            "stratify":      false,
+            "random_state":  42
         }
     },
 
-    "score": "max balanced_accuracy",     // mode and metrics used for scoring
-    "test_model": true,     // if model is tested after training
-    "debug": false,         // debug model architecture
-    "save_dir": "saved/"    // directory of saved reports, models and configs
+    "score":       "min neg_mean_absolute_error",
+    "test_model":  true,
+    "debug":       false,
+    "save_dir":    "saved/"
 }
-
 ```
 
-Additional parameters can be added to config file. See `scikit-learn` documentation for description of tuned parameters, search method and cross validation. Possible metrics for model evaluation could be found [here](https://scikit-learn.org/stable/modules/model_evaluation.html).
+| Field | Description |
+|---|---|
+| `name` | Experiment name — used as the save sub-directory |
+| `model.args.pipeline` | Ordered list of processing steps by registered name |
+| `model.args.unions` | Named parallel feature unions for sensor fusion |
+| `tuned_parameters` | Hyperparameter grid in scikit-learn double-underscore notation |
+| `optimizer` | Name of the optimizer class to use |
+| `search_method` | Search algorithm and its arguments |
+| `cross_validation` | CV strategy and its arguments |
+| `data_loader` | Data loader class and data-path / split settings |
+| `score` | `"min"` or `"max"` followed by a scikit-learn metric name |
+| `test_model` | Whether to evaluate the best model on the held-out test set |
+| `debug` | Print step-by-step pipeline outputs |
+| `save_dir` | Root directory for saved artefacts |
 
 ### Pipeline
-Methods added to config pipeline must be first defined in `models/__init__.py` file. For previous example of config file the following must be added:
 
-  ```python
+Steps must be registered in `models/__init__.py` before use:
+
+```python
 from wrappers import *
-from sklearn.svm import SVC
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import PolynomialFeatures
 
 methods_dict = {
-    'pf': PolynomialFeatures,
-    'scaler': StandardScaler,
-    'PLS':PLSRegressionWrapper,
-    'SVC':SVC,
+    'scaler':            StandardScaler,
+    'GBR':               GradientBoostingRegressor,
+    'satellite_features': SatelliteFeatureTransformer,   # custom wrapper
+    'sensor_features':   SensorFeatureTransformer,       # custom wrapper
 }
-  ```
-Majority of algorithms implemented in `scikit-learn` library can be directly imported and used. Some algorithms need a little modification before usage. Such an example is Partial least squares (PLS). Modification is implemented in `wrappers/wrappers.py`. In case you want to implement your own method it can be done as well. An example wrapper for Savitzky golay filter is shown in `wrappers/data_transformations.py`. Implementation must satisfy standard method calls, eg. fit(), tranform() etc.
+```
 
-### Unions
+### Unions (Feature Fusion)
 
-Unions concatenates results of multiple transformer methods. Those are applied in parallel to the input data. This is useful if you want to combine several feature mechanisms into a single transformer. For example, if you want to merge results from Principal component analysis (PCA) and Partial least squares (PLS) you can do the following:
+Unions are the core sensor-fusion mechanism. They apply multiple transformers **in parallel** to the input data and concatenate their outputs before feeding the result to the next pipeline step:
 
-```javascript
-"pipeline": ["scaler", "pca-pls", "SVC"],
+```json
+"pipeline": ["scaler", "sat_sensor_union", "RF"],
 "unions": {
-    "pca-pls": ["PLS", "PCA"]
+    "sat_sensor_union": ["satellite_features", "sensor_features"]
 }
 ```
 
-In pipeline you must write self made-up name of a method (in this case `pca-pls`) and then use the same name as a key in unions dictionary. Value to coresponding key must be list of methods (in this case consisting of "PCA" and "PLS"). Hyperparameters which are tuned with a chosen search method must be separated with double underscore (following `scikit-learn` nomenclature). In case you want to tune number of components of both methods you can do the following:
+Hyperparameters inside a union follow the `union_name__step_name__param` convention:
 
-```javascript
-"tuned_parameters":[{
-    "pca-pls__PLS__n_components": [1,2,3],
-    "pca-pls__PCA__n_components": [1,2,3]
-}],
+```json
+"tuned_parameters": [{
+    "sat_sensor_union__satellite_features__n_components": [5, 10, 20],
+    "sat_sensor_union__sensor_features__window_size":     [3, 6, 12]
+}]
 ```
 
-Please refer to `configs/config_unions.json` for unions example.
-### Debug
+### Hyperparameter Search
 
-To debug model architecture set debug flag in config file to `true`. It will print model  by steps with coresponding consecutive outputs produced at each step. Model debugging will only work with `GridSearchCV` search method. In case many parameters are listed to choose from only first ones will be used for evaluation. Debugging is useful in cases when you want to get a sense of what happens at separate step.
+| Method | When to use |
+|---|---|
+| `GridSearchCV` | Small, well-known parameter grids; exhaustive coverage needed |
+| `RandomizedSearchCV` | Large grids; discovering new promising regions |
+| `BayesSearchCV` | Maximum sample efficiency; long-running model evaluations |
 
-## Customization
+Increase throughput by setting `"n_jobs": -1` to use all available CPU cores.
 
+---
 
-### Custom CLI options
+## Usage
 
-Changing values of config file is a clean, safe and easy way of tuning hyperparameters. However, sometimes
-it is better to have command line options if some values need to be changed too often or quickly.
+### Training a Model
 
-This template uses the configurations stored in the json file by default, but by registering custom options as follows
-you can change some of them using CLI flags.
+```bash
+python main.py -c configs/config_regression.json
+```
 
-  ```python
-  # simple class-like object having 3 attributes, `flags`, `type`, `target`.
-  CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
-  options = [
-        CustomArgs(['-cv', '--cross_validation'], type=int, target='cross_validation;args;n_repeats'),
-      # options added here can be modified by command line flags.
+### Testing a Model
+
+Set `"test_model": true` in the config file. After optimisation completes, Forge will automatically load the best model, run inference on the held-out test set, and write `report_test.txt` to the save directory.
+
+### CLI Overrides
+
+Common parameters can be overridden at runtime without editing the config file:
+
+```bash
+# Override the number of cross-validation repeats
+python main.py -c configs/config_regression.json --cross_validation 20
+```
+
+Custom CLI arguments are registered in `main.py` via `collections.namedtuple`:
+
+```python
+CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
+options = [
+    CustomArgs(['-cv', '--cross_validation'], type=int, target='cross_validation;args;n_repeats'),
 ]
-  ```
-`target` argument should be sequence of keys, which are used to access that option in the config dict. In this example, `target`
-number of repeats in cross validation option is `('cross_validation', 'args', 'n_repeats')` because `config['cross_validation']['args']['n_repeats']` points to number of repeats.
+```
 
+The `target` uses semicolons as key separators to traverse the nested config dictionary.
 
-### Data Loader
-* **Writing your own data loader**
+---
 
-1. **Inherit ```BaseDataLoader```**
+## Customisation
 
-    `BaseDataLoader` handles:
-    * Train/test procedure
-    * Data shuffling
+### Custom Data Loader
 
-* **Usage**
+1. Inherit `BaseDataLoader` from `base/base_data_loader.py`.
+2. Load your satellite imagery and sensor CSVs (or any format) and assign to the handler attributes:
 
-    Loaded data must be assigned to data_handler (dh) in appropriate manner. If dh.X_data_test and dh.y_data_test are not assigned in advance, train/test split could be created by base data loader. In case `"test_split":0.0` is set in config file, whole dataset is used for training. Another option is to assign both train and test sets as shown below. In this case train data will be used for optimization and test data will be used for evaluation of a model.
+```python
+from base import BaseDataLoader
 
-    ```python
-    data_handler.X_data = X_train
-    data_handler.y_data = y_train
-    data_handler.X_data_test = X_test
-    data_handler.y_data_test = y_test
-    ```
-* **Example**
+class WeatherDataLoader(BaseDataLoader):
+    def __init__(self, data_path, training, **kwargs):
+        super().__init__(**kwargs)
 
-  Please refer to `data_loaders/data_loaders.py` for data loading example.
+        satellite_df = load_satellite_features(data_path)   # your loader
+        sensor_df    = load_sensor_timeseries(data_path)    # your loader
+        combined     = fuse(satellite_df, sensor_df)        # merge on timestamp/grid
 
-### Optimizer
-* **Writing your own optimizer**
+        if training:
+            self.dh.X_data = combined.drop(columns=['target'])
+            self.dh.y_data = combined['target']
+        else:
+            self.dh.X_data_test = combined.drop(columns=['target'])
+            self.dh.y_data_test = combined['target']
+```
 
-1. **Inherit ```BaseOptimizer```**
+Refer to `data_loaders/data_loaders.py` for a complete example.
 
-    `BaseOptimizer` handles:
-    * Optimization procedure
-    * Model saving and loading
-    * Report saving
+### Custom Model
 
+1. Inherit `BaseModel` from `base/base_model.py`.
+2. Implement `created_model()` which returns a fitted pipeline:
 
-2. **Implementing abstract methods**
+```python
+from base import BaseModel
 
-    You need to implement `fitted_model()` which must return fitted model.
-    Optionally you can implement format of train/test reports with `create_train_report()` and `create_test_report()`.
-
-* **Example**
-
-  Please refer to `optimizers/optimizers.py` for optimizer example.
-
-### Model
-* **Writing your own model**
-
-1. **Inherit `BaseModel`**
-
-    `BaseModel` handles:
-    * Initialization defined in config pipeline
-    * Modification of steps
-
-2. **Implementing abstract methods**
-
-    You need to implement `created_model()` which must return created model.
-
-* **Usage**
-
-    Initialization of pipeline methods is performed with `create_steps()`. Steps can be later modified with the use of `change_step()`. An example on how to change a step is shown bellow where Sequential feature selector is added to the pipeline.
-
-    ```python
-    def __init__(self, pipeline):
+class WeatherModel(BaseModel):
+    def __init__(self, pipeline, **kwargs):
         steps = self.create_steps(pipeline)
-
-        rf = RandomForestRegressor(random_state=1)
-        clf = TransformedTargetRegressor(regressor=rf,
-                                        func=np.log1p,
-                                        inverse_func=np.expm1)
-        sfs = SequentialFeatureSelector(clf, n_features_to_select=2, cv=3)
-
-        steps = self.change_step('sfs', sfs, steps)
-
         self.model = Pipeline(steps=steps)
 
-    ```
+    def created_model(self):
+        return self.model
+```
 
-    Beware that in this case 'sfs' needs to be added to pipeline in config file. Otherwise, no step in the pipeline is changed.
+Refer to `models/models.py` for a complete example.
 
-* **Example**
+### Custom Optimizer
 
-  Please refer to `models/models.py` model example.
+1. Inherit `BaseOptimizer` from `base/base_optimizer.py`.
+2. Implement `fitted_model()`.  Optionally implement `create_train_report()` and `create_test_report()` for domain-specific metrics (e.g. RMSE, Brier score, Critical Success Index):
 
-## Common Questions About Hyperparameter Optimization
+```python
+from base import BaseOptimizer
+from sklearn.metrics import mean_absolute_error, r2_score
 
-### How to Choose Between Random and Grid Search?
-* Choose the method based on your needs. I recommend starting with grid and doing a random search if you have the time.
-* Grid search is appropriate for small and quick searches of hyperparameter values that are known to perform well generally.
-* Random search is appropriate for discovering new hyperparameter values or new combinations of hyperparameters, often resulting in better performance, although it may take more time to complete.
+class OptimizerRegression(BaseOptimizer):
+    def fitted_model(self):
+        self.search_method.fit(self.dh.X_data, self.dh.y_data)
+        return self.search_method.best_estimator_
 
-### How to Speed-Up Hyperparameter Optimization?
-* Ensure that you set the “n_jobs” argument to the number of cores on your machine.
-* Evaluate on a smaller sample of your dataset.
-* Explore a smaller search space.
-* Use fewer repeats and/or folds for cross-validation.
-* Execute the search on a faster machine, such as AWS EC2.
-* Use an alternate model that is faster to evaluate.
+    def create_test_report(self, y_true, y_pred):
+        return {
+            'MAE':  mean_absolute_error(y_true, y_pred),
+            'R2':   r2_score(y_true, y_pred),
+        }
+```
 
-More on: [machinelearningmastery](https://machinelearningmastery.com/hyperparameter-optimization-with-random-search-and-grid-search/).
+Refer to `optimizers/optimizers.py` for a complete example.
+
+---
+
+## Data Sources
+
+Forge is data-source agnostic. Typical inputs for weather prediction tasks include:
+
+**Satellite platforms**
+- GOES-16/17/18 (ABI Level-2 products: cloud-top temperature, total precipitable water, derived motion winds)
+- Meteosat / MSG (SEVIRI brightness temperatures, derived rainfall rates)
+- Sentinel-3 OLCI/SLSTR (sea surface temperature, fire radiative power)
+- MODIS / VIIRS (aerosol optical depth, snow cover)
+- ERA5 reanalysis gridded fields (used as a high-quality satellite-era proxy)
+
+**Terrestrial sensor networks**
+- Automated Surface Observing System (ASOS) stations
+- Mesonet networks (Oklahoma Mesonet, West Texas Mesonet, etc.)
+- Amateur / citizen-science networks (Weather Underground Personal Weather Stations)
+- IoT and MEMS deployments (BME280, SHT31, BMP390-class sensors)
+- Radiosonde / upper-air sounding data
+
+Prepare your data as tabular files (CSV, Parquet, HDF5) or structured NumPy arrays and plug in a custom `BaseDataLoader`.
+
+---
 
 ## Roadmap
 
-See [open issues](https://github.com/janezlapajne/sklearn-project-template/issues) to request a feature or report a bug.
+- [ ] Deep learning backends (PyTorch / TensorFlow pipelines via sklearn wrappers)
+- [ ] Native support for NetCDF / GRIB2 satellite product ingestion
+- [ ] Spatial cross-validation strategies (block CV, buffered leave-one-out)
+- [ ] MLflow / Weights & Biases experiment tracking integration
+- [ ] Docker image for reproducible deployment
+- [ ] Real-time inference mode with streaming sensor data
 
-## Contribution
+See the [open issues](https://github.com/jay-ramani/forge/issues) to request a feature or report a bug.
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+---
 
-How to start with contribution:
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
+## Contributing
+
+Contributions are welcome and greatly appreciated.
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m 'Add my feature'`
+4. Push to the branch: `git push origin feature/my-feature`
 5. Open a Pull Request
 
-Feel free to contribute any kind of function or enhancement.
+---
 
 ## License
-This project is licensed under the MIT License. See  LICENSE for more details.
 
-## Acknowledgements
-This project is inspired by the project [pytorch-template](https://github.com/victoresque/pytorch-template) by [Victor Huang](https://github.com/victoresque). I would like to confess that some functions, architecture and some parts of readme were directly copied from this repo. But to be honest, what should I do - the project is absolutely amazing!
-
-Additionally, special thanks to the creator of Machine learning mastery, [Jason Brownlee, PhD](https://machinelearningmastery.com/about/) for insightful articles published!
-
-## Consider supporting
-
-Do you feel generous today? I am still a student and would make a good use of some extra money :P
-
-
-
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/janezlapajne)
-
-<!-- Odspodi ni več.
-
-____________
-
-This is a simple python project template for Visual studio code.
-
-Create and activate virtual environment:
-
-   ```sh
-   python -m venv .venv
-   ```
-   ```sh
-   "./.venv/Scripts/activate"
-   ```
-
-   or
-
-   ```sh
-   conda create -n yourenvname python=x.x anaconda
-   ```
-   ```sh
-   conda activate yourenvname
-   ```
-
-Clear git cached files and directories:
-
-   ```sh
-   git rm --cached -r .vscode
-   ```
-   ```sh
-   git rm --cached .env
-   ```
-
-Set path to project root directory in `.env`, e.g.:
-
-   ```sh
-   PYTHONPATH=C:\\Users\\janezla\\Documents\\python-project-template
-   ```
-
-Set python path in vscode workspace settings, e.g.:
-   ```sh
-   "python.pythonPath": "C:\\Users\\janezla\\Anaconda3\\envs\\yourenvname\\python"
-   ``` -->
-
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for full details.
