@@ -466,4 +466,4 @@ Contributions are welcome and greatly appreciated.
 
 ## License
 
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for full details.
+This project is licensed under the **GNU General public License v3**. See [LICENSE](LICENSE) for full details.
